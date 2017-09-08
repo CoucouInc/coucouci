@@ -1,0 +1,13 @@
+config:
+  port: 6666
+  executorCount: 1
+jobs:
+  testingStuff:
+    source: https://github.com/CoucouInc/lambdaCoucou.git
+    steps:
+      - run: echo "foo"
+      - run:
+          name: echoing stuff
+          command: echo "bar"
+      - run: echo "yo" && sleep 2 && echo "bar after a while"
+      - run: nope
