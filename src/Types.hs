@@ -13,6 +13,7 @@ import Data.Aeson.Types as JSON
 import qualified Control.Concurrent.MSemN2 as Sem
 import qualified Control.Concurrent.MVar as MVar
 import Control.Monad.Reader
+import qualified Data.Vector as V
 
 minimize :: String -> String
 minimize "" = ""
@@ -44,16 +45,31 @@ instance FromJSON ConfigServer where
 
 data Job = Job
     { jobName :: !Text
-    , jobSource :: !Text
+    , jobGithubName :: !Text
+    , jobBranches :: JobBranch
     , jobSteps :: [Step]
     } deriving (Show)
 
+data JobBranch = AllBranches | SomeBranches [Text] deriving Show
+
 parseJob :: Text -> Yaml.Value -> Parser Job
 parseJob jobName (Object o) = do
-    jobSource <- o .: "source"
+    jobGithubName <- o .: "githubName"
+    jobBranches <- (o .:? "branches" .!= Yaml.String "master") >>= parseJobBranches
     jobSteps <- o .: "steps"
     pure Job{..}
 parseJob jobName _ = fail $ "cannot parse job: " ++ unpack jobName
+
+parseJobBranches :: Yaml.Value -> Parser JobBranch
+parseJobBranches (Yaml.String str) =
+    if str == "all"
+        then pure AllBranches
+        else pure $ SomeBranches [str]
+parseJobBranches (Yaml.Array arr) = do
+    branches <- traverse (withText "branch name must be a string" pure) arr
+    pure $ SomeBranches (V.toList branches)
+parseJobBranches _ = fail "Cannot parse branches"
+
 
 data Step = RunStep
     { stepName :: Maybe Text
@@ -78,3 +94,8 @@ data CiConfig = CiConfig
     , ciConfigJobs :: [Job]
     , ciConfigLogger :: String -> IO ()
     }
+
+data CliCommand =
+    ServerStart {configLocation :: !FilePath}
+    | ServerStop
+    | ServerStatus deriving Show

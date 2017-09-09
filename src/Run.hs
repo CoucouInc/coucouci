@@ -18,13 +18,15 @@ import Conduit as C
 
 import Types
 
-runJob :: CiConfig -> Job -> IO ()
-runJob config job = do
+
+runJob :: CiConfig -> Job -> T.Text -> IO ()
+runJob config job branch = do
+    let cloneUrl = "https://github.com/" <> jobName job <> ".git"
     let steps = jobSteps job
     let sem = ciConfigExecutorLock config
     let log = ciConfigLogger config
     runProcess "mkdir -p .coucouci"
-    clone job
+    clone job cloneUrl branch
     log $ "got " ++ show (length steps) ++ " steps\n"
     results <- Async.mapConcurrently (Sem.with sem 1 . runStep log job) steps
     forM_ (zip results steps) $ \a -> log (T.unpack $ prettyResults a <> "\n")
@@ -33,7 +35,6 @@ runJob config job = do
 
 runStep :: (String -> IO ()) -> Job -> Step -> IO (Exit.ExitCode, ByteString, ByteString)
 runStep log job step = do
-    let url = jobSource job
     log $ "Executing command: " <> T.unpack (stepCommand step) <> "\n"
     let prefix = ".coucouci/" <> jobName job
     let cmd = shell $ T.unpack $ stepCommand step
@@ -51,18 +52,19 @@ logAndAccumulate :: (String -> IO ()) -> C.ConduitM BS.ByteString a IO [BS.ByteS
 logAndAccumulate log = C.mapMC (\s -> log (T.unpack $ T.decodeUtf8 s) >> pure s) .| C.sinkList
 
 
-clone :: Job -> IO ()
-clone job = do
-    putStrLn $ "cloning: " <> T.unpack (jobSource job)
+clone :: Job -> T.Text -> T.Text -> IO ()
+clone job cloneUrl branch = do
+    putStrLn $ "cloning: " <> T.unpack cloneUrl
     let target = ".coucouci/" <> jobName job
     alreadyThere <- Dir.doesDirectoryExist (T.unpack target)
     if alreadyThere
         then do
-            let process = setWorkingDir (T.unpack target) $ shell "git pull --force"
+            let cmd = "git clean -f && git checkout " <> branch <> " && git pull --force"
+            let process = setWorkingDir (T.unpack target) $ shell $ T.unpack cmd
             result <- runProcess process
             putStrLn $ "exit code: " ++ show result
         else do
-            let cmd = "git clone --depth=1 " <> jobSource job <> " " <> target
+            let cmd = "git clone -b " <> branch <> " --depth=1 " <> cloneUrl <> " " <> target
             result <- runProcess $ shell $ T.unpack cmd
             putStrLn $ "exit code: " ++ show result
 

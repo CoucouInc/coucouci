@@ -3,7 +3,10 @@ config:
   executorCount: 4
 jobs:
   testingStuff:
-    source: https://github.com/CoucouInc/lambdaCoucou.git
+    githubName: "geekingfrog/testhook"
+    branches:
+      - master
+    # branches: all
     steps:
       - run: echo "foo"
       - run:
