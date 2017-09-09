@@ -33,29 +33,26 @@ type Resp = Text
 hookAPI :: Proxy HookAPI
 hookAPI = Proxy
 
--- hookServerT :: ServerT HookAPI (Reader Config)
--- hookServerT =
-
-readerToHandler' :: forall a. Config -> ReaderT Config IO a -> Handler a
+readerToHandler' :: forall a. CiConfig -> ReaderT CiConfig IO a -> Handler a
 readerToHandler' config r = liftIO (runReaderT r config)
 
-readerToHandler :: Config -> ReaderT Config IO :~> Handler
+readerToHandler :: CiConfig -> ReaderT CiConfig IO :~> Handler
 readerToHandler config = NT $ readerToHandler' config
 
-hookServerT :: ServerT HookAPI (ReaderT Config IO)
+hookServerT :: ServerT HookAPI (ReaderT CiConfig IO)
 hookServerT githubPayload = do
     liftIO $ print $ "github payload: " ++ show githubPayload
     config <- ask
-    liftIO $ print $ "config: " ++ show config
+    -- liftIO $ print $ "config: " ++ show config
     let cloneUrl = githubPayload ^.key "repository" .key "clone_url" ._String
-    case List.find ((== cloneUrl) . jobSource) (configJobs config) of
+    case List.find ((== cloneUrl) . jobSource) (ciConfigJobs config) of
       Nothing -> liftIO $ print "no matching clone url, ignoring event"
       -- TODO add a MonadResource constraint to cleanup async job in case server goes down
       -- (restart or stop)
-      Just jobToRun -> void $ liftIO $ Async.async $ Run.runJob jobToRun
+      Just jobToRun -> void $ liftIO $ Async.async $ Run.runJob config jobToRun
     return NoContent
 
-hookServer :: Config -> Server HookAPI
+hookServer :: CiConfig -> Server HookAPI
 hookServer config = enter (readerToHandler config) hookServerT
 
 -- hookServer :: Server HookAPI
@@ -63,8 +60,8 @@ hookServer config = enter (readerToHandler config) hookServerT
 --     liftIO $ print githubPayload
 --     return NoContent
 
-hookApp :: Config -> Wai.Application
+hookApp :: CiConfig -> Wai.Application
 hookApp config = serve hookAPI (hookServer config)
 
-runHookServer :: Config -> IO ()
-runHookServer config = run (serverPort $ configServer config) (hookApp config)
+runHookServer :: Int -> CiConfig -> IO ()
+runHookServer port config = run port (hookApp config)

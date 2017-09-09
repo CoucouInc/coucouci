@@ -1,15 +1,20 @@
 config:
   port: 6666
-  executorCount: 1
+  executorCount: 4
 jobs:
   testingStuff:
     source: https://github.com/CoucouInc/lambdaCoucou.git
     steps:
-      # - run: stack build
       - run: echo "foo"
       - run:
-          name: echoing stuff
-          command: echo "bar"
+          name: loop1
+          command: for i in {1..5}; do echo $i && sleep 1; done;
       - run:
-          name: fail
+          name: loop2
+          command: for i in {5..10}; do echo $i && sleep 1; done;
+      - run:
+          name: loop3
+          command: for i in {10..15}; do echo $i && sleep 1; done;
+      - run:
+          name: boom
           command: nope

@@ -10,6 +10,9 @@ import Data.Yaml as Yaml
 import Data.Text (Text, unpack)
 import qualified Data.Char as Char
 import Data.Aeson.Types as JSON
+import qualified Control.Concurrent.MSemN2 as Sem
+import qualified Control.Concurrent.MVar as MVar
+import Control.Monad.Reader
 
 minimize :: String -> String
 minimize "" = ""
@@ -38,9 +41,6 @@ data ConfigServer = ConfigServer
 
 instance FromJSON ConfigServer where
     parseJSON = genericParseJSON defaultOptions {fieldLabelModifier = minimize . drop 6}
-
--- instance FromJSON ConfigServer where
---     parseJSON = error "wip parsejson configserver"
 
 data Job = Job
     { jobName :: !Text
@@ -72,3 +72,9 @@ instance FromJSON Step where
 
 
 type GithubPayload = JSON.Value
+
+data CiConfig = CiConfig
+    { ciConfigExecutorLock :: Sem.MSemN Int
+    , ciConfigJobs :: [Job]
+    , ciConfigLogger :: String -> IO ()
+    }

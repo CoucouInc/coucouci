@@ -28,6 +28,7 @@ executable coucouci
                      , lens-aeson
                      , lens
                      , async
+                     , SafeSemaphore
                      , typed-process
                      , unordered-containers
                      , servant
@@ -36,3 +37,6 @@ executable coucouci
                      , warp
                      , mtl
                      , directory
+                     , conduit
+                     , conduit-combinators
+                     , resourcet
