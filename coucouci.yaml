@@ -5,9 +5,10 @@ jobs:
   testingStuff:
     source: https://github.com/CoucouInc/lambdaCoucou.git
     steps:
+      - run: stack build
       - run: echo "foo"
       - run:
           name: echoing stuff
           command: echo "bar"
-      - run: echo "yo" && sleep 2 && echo "bar after a while"
-      - run: nope
+      # - run: echo "yo" && sleep 2 && echo "bar after a while"
+      - run: ls

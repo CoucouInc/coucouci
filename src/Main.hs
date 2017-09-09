@@ -13,6 +13,7 @@ import System.Process.Typed
 
 import Types
 import Hook
+import qualified Run as Run
 
 import Data.Aeson.Lens
 import Control.Lens
@@ -28,4 +29,6 @@ testConfig = do
     raw <- BS.readFile "coucouci.yaml"
     case parseConfig raw of
         Left err -> die (show err)
-        Right config -> putStrLn $ "got config: " ++ show config
+        Right config -> do
+            putStrLn $ "got config: " ++ show config
+            Run.runJob $ head (configJobs config)
