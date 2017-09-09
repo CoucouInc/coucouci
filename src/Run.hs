@@ -4,11 +4,14 @@ module Run where
 
 import Data.Monoid
 import Control.Monad
+import Data.Maybe
 import qualified System.Exit as Exit
 import qualified System.Directory as Dir
 import Control.Concurrent.Async as Async
 import qualified Data.Text as T
+import Data.Text.Encoding as T
 import System.Process.Typed
+import Data.ByteString.Lazy (ByteString, toStrict)
 
 import Types
 
@@ -18,15 +21,19 @@ runJob job = do
     runProcess "mkdir -p .coucouci"
     clone job
     putStrLn $ "got " ++ show (length steps) ++ " steps"
-    exitCodes <- mapM (runStep job) steps
-    print exitCodes
+    results <- Async.mapConcurrently (runStep job) steps
+    forM_ (zip results steps) $ \a -> putStrLn (T.unpack $ prettyResults a)
 
-runStep :: Job -> Step -> IO Exit.ExitCode
+runStep :: Job -> Step -> IO (Exit.ExitCode, ByteString, ByteString)
 runStep job step = do
     let url = jobSource job
     putStrLn $ "Executing command: " <> T.unpack (stepCommand step)
     let prefix = ".coucouci/" <> jobName job
-    runProcess $ setWorkingDir (T.unpack prefix) $ shell (T.unpack $ stepCommand step)
+    readProcess
+        $ setWorkingDir (T.unpack prefix)
+        $ setStdout byteStringOutput
+        $ setStderr byteStringOutput
+        $ shell (T.unpack $ stepCommand step)
 
 clone :: Job -> IO ()
 clone job = do
@@ -43,8 +50,17 @@ clone job = do
             result <- runProcess $ shell $ T.unpack cmd
             putStrLn $ "exit code: " ++ show result
 
-testCWD :: IO ()
-testCWD = do
-    runProcess "mkdir -p .coucouci"
-    runProcess "cd .coucouci"
-    runProcess "ls" >>= print
+prettyResults :: ((Exit.ExitCode, ByteString, ByteString), Step) -> T.Text
+prettyResults ((exitCode, out, err), step) =
+  let
+    name = fromMaybe (stepCommand step) (stepName step)
+    mark = if exitCode == Exit.ExitSuccess then "✓" else "✗"
+    header = "$ " <> name
+    footer = name <> " " <> mark
+  in
+    T.unlines
+        [ header
+        , T.decodeUtf8 (toStrict out)
+        , T.decodeUtf8 (toStrict err)
+        , footer
+        ]
