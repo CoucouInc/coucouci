@@ -5,19 +5,20 @@ jobs:
   testingStuff:
     githubName: "geekingfrog/testhook"
     branches:
-      - master
+      - branch2
     # branches: all
     steps:
       - run: echo "foo"
       - run:
           name: loop1
           command: for i in {1..5}; do echo $i && sleep 1; done;
-      - run:
-          name: loop2
-          command: for i in {5..10}; do echo $i && sleep 1; done;
-      - run:
-          name: loop3
-          command: for i in {10..15}; do echo $i && sleep 1; done;
+      # - run:
+      #     name: loop2
+      #     command: for i in {5..10}; do echo $i && sleep 1; done;
+      # - run:
+      #     name: loop3
+      #     command: for i in {10..15}; do echo $i && sleep 1; done;
       - run:
           name: boom
           command: nope
+      - run: ls

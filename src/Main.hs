@@ -45,8 +45,7 @@ startServer configLocation = do
         Right config -> do
             putStrLn $ "got config: " ++ show config
             ciConf <- makeCiConfig config
-            Hook.runHookServer 6666 ciConf
-            -- mapM_ (Run.runJob ciConf) (configJobs config)
+            Hook.runHookServer (serverPort $ configServer config) ciConf
 
 
 makeCiConfig :: Config -> IO CiConfig
@@ -61,12 +60,13 @@ makeCiConfig conf = do
         }
 
 
--- testConfig :: IO ()
--- testConfig = do
---     raw <- BS.readFile "coucouci.yaml"
---     case parseConfig raw of
---         Left err -> die (show err)
---         Right config -> do
---             putStrLn $ "got config: " ++ show config
---             ciConf <- makeCiConfig config
---             mapM_ (Run.runJob ciConf) (configJobs config)
+testConfig :: IO ()
+testConfig = do
+    raw <- BS.readFile "coucouci.yaml"
+    case parseConfig raw of
+        Left err -> die (show err)
+        Right config -> do
+            putStrLn $ "got config: " ++ show config
+            ciConf <- makeCiConfig config
+            Run.runJob ciConf (head $ configJobs config) (T.pack "branch2")
+            -- mapM_ (Run.runJob ciConf) (configJobs config)

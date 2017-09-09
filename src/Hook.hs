@@ -53,7 +53,7 @@ hookServerT githubPayload = do
 
     let inspected = runExcept $ do
             job <- except $ hoist "No matching job" $
-                List.find ((== repoName) . jobName) (ciConfigJobs config)
+                List.find ((== repoName) . jobGithubName) (ciConfigJobs config)
             branch <- except $ hoist "no branch found!" $ getBranch githubPayload
             let branchFound = case jobBranches job of
                     AllBranches -> True
@@ -61,21 +61,11 @@ hookServerT githubPayload = do
             unless branchFound $ throwError "no matching branch"
             pure (job, branch)
     case inspected of
-        Left msg -> liftIO $ ciConfigLogger config msg
+        Left msg -> liftIO $ ciConfigLogger config (msg ++ "\n")
         Right (job, branch) -> void $ liftIO $ Async.async $ Run.runJob config job branch
 
-    -- case List.find ((== repoName) . jobName) (ciConfigJobs config) of
-    --     Nothing -> liftIO $ ciConfigLogger config $ "No matching repo for " ++ T.unpack repoName
-    --     Just job -> do
-    --         let cloneUrl = githubPayload ^.key "repository" .key "clone_url" ._String
-
-    -- liftIO $ print $ "config: " ++ show config
-    -- case List.find ((== cloneUrl) . jobSource) (ciConfigJobs config) of
-    --   Nothing -> liftIO $ print "no matching clone url, ignoring event"
-    --   -- TODO add a MonadResource constraint to cleanup async job in case server goes down
-    --   -- (restart or stop)
-    --   Just jobToRun -> void $ liftIO $ Async.async $ Run.runJob config jobToRun
     return NoContent
+
 
 hookServer :: CiConfig -> Server HookAPI
 hookServer config = enter (readerToHandler config) hookServerT
