@@ -27,6 +27,7 @@ import Network.Wai.Handler.Warp (run)
 import Servant
 import Data.Void
 import qualified Data.List as List
+import qualified Data.HashMap.Strict as Map
 
 import qualified Run as Run
 import Types
@@ -52,17 +53,17 @@ hookServerT githubPayload = do
     let repoName = githubPayload ^.key "repository" .key "full_name" ._String
 
     let inspected = runExcept $ do
-            job <- except $ hoist "No matching job" $
-                List.find ((== repoName) . jobGithubName) (ciConfigJobs config)
+            toRun@(job, jobDetails) <- except $ hoist "No matching job" $
+                Map.lookup repoName (ciConfigJobs config)
             branch <- except $ hoist "no branch found!" $ getBranch githubPayload
             let branchFound = case jobBranches job of
                     AllBranches -> True
                     SomeBranches brs -> isJust $ List.find (== branch) brs
             unless branchFound $ throwError "no matching branch"
-            pure (job, branch)
+            pure (toRun, branch)
     case inspected of
         Left msg -> liftIO $ ciConfigLogger config (msg ++ "\n")
-        Right (job, branch) -> void $ liftIO $ Async.async $ Run.runJob config job branch
+        Right (toRun, branch) -> void $ liftIO $ Async.async $ Run.runJob config toRun branch
 
     return NoContent
 

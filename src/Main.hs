@@ -1,4 +1,6 @@
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TemplateHaskell #-}
+
 
 module Main where
 
@@ -10,7 +12,9 @@ import qualified Data.Yaml as Yaml
 import qualified Data.Text as T
 import qualified Control.Concurrent.MSemN2 as Sem
 import qualified Control.Concurrent.MVar as MVar
+import qualified Control.Concurrent.STM as STM
 import qualified System.IO as IO
+import qualified Data.HashMap.Strict as Map
 
 import System.Process.Typed
 
@@ -53,11 +57,16 @@ makeCiConfig conf = do
     sem <- Sem.new (serverExecutorCount $ configServer conf)
     loggerLock <- MVar.newMVar ()
     let logger msg = MVar.withMVar loggerLock (\_ -> putStr msg)
+    jobs <- mapM jobDetail (configJobs conf)
     pure CiConfig
         { ciConfigExecutorLock = sem
-        , ciConfigJobs = configJobs conf
+        , ciConfigJobs = Map.fromList jobs
         , ciConfigLogger = logger
         }
+  where
+    jobDetail j = do
+        tvar <- STM.newTVarIO (JobDetail NeverRun Map.empty)
+        pure (jobName j, (j, tvar))
 
 
 testConfig :: IO ()
@@ -68,5 +77,6 @@ testConfig = do
         Right config -> do
             putStrLn $ "got config: " ++ show config
             ciConf <- makeCiConfig config
-            Run.runJob ciConf (head $ configJobs config) (T.pack "branch2")
-            -- mapM_ (Run.runJob ciConf) (configJobs config)
+            tvar <- STM.newTVarIO (JobDetail NeverRun Map.empty)
+            let j = (head $ configJobs config, tvar)
+            Run.runJob ciConf j (T.pack "branch2")

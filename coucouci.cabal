@@ -30,9 +30,12 @@ executable coucouci
                      , lens-aeson
                      , lens
                      , async
+                     , stm
                      , SafeSemaphore
                      , typed-process
                      , unordered-containers
+                     , containers
+                     , hashable
                      , vector
                      , servant
                      , servant-server

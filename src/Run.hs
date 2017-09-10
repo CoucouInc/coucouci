@@ -5,22 +5,27 @@ module Run where
 import Data.Monoid
 import Control.Monad
 import Data.Maybe
+import Data.Foldable
 import qualified System.Exit as Exit
 import qualified System.Directory as Dir
 import Control.Concurrent.Async as Async
+import qualified Control.Concurrent.MSemN2 as Sem
+import qualified Control.Concurrent.STM as STM
 import qualified Data.Text as T
 import Data.Text.Encoding as T
 import System.Process.Typed
 import Data.ByteString.Lazy (ByteString, toStrict, fromChunks)
 import qualified Data.ByteString as BS
-import qualified Control.Concurrent.MSemN2 as Sem
 import Conduit as C
+import qualified Data.Sequence as Seq
+import qualified Data.HashMap.Strict as Map
+import Control.Lens
 
 import Types
 
 
-runJob :: CiConfig -> Job -> T.Text -> IO ()
-runJob config job branch = do
+runJob :: CiConfig -> (Job, STM.TVar JobDetail) -> T.Text -> IO ()
+runJob config (job, jobDetail) branch = do
     let cloneUrl = "https://github.com/" <> jobGithubName job <> ".git"
     let steps = jobSteps job
     let sem = ciConfigExecutorLock config
@@ -29,28 +34,64 @@ runJob config job branch = do
     clone job cloneUrl branch
     log $ "got " ++ show (length steps) ++ " steps\n"
     let stepPrefix = ".coucouci/" <> jobName job <> "-" <> branch
-    results <- Async.mapConcurrently (Sem.with sem 1 . runStep log stepPrefix) steps
+
+    -- reset the job status
+    stepsList <- mapM makeStepProgress steps
+    let stepsMap = Map.fromList stepsList
+    STM.atomically $ STM.writeTVar jobDetail (JobDetail Running stepsMap)
+
+    -- start all steps
+    results <- Async.mapConcurrently (Sem.with sem 1 . runStep log stepPrefix) stepsList
+    STM.atomically $ STM.modifyTVar' jobDetail (set jobDetailStatus Completed)
     forM_ (zip results steps) $ \a -> log (T.unpack $ prettyResults a <> "\n")
     log $ "Done executing job " ++ T.unpack (jobName job) ++ "\n"
 
 
-runStep :: (String -> IO ()) -> T.Text -> Step -> IO (Exit.ExitCode, ByteString, ByteString)
-runStep log prefix step = do
+makeStepProgress :: Step -> IO (Step, STM.TVar StepProgress)
+makeStepProgress step = do
+    t <- STM.newTVarIO (StepProgress StepNotRunning Seq.empty Seq.empty)
+    pure (step, t)
+
+
+runStep
+    :: (String -> IO ())
+    -> T.Text
+    -> (Step, STM.TVar StepProgress)
+    -> IO (Exit.ExitCode, ByteString, ByteString)
+runStep log prefix (step, stepProgress) = do
     log $ T.unpack $ "Executing command: " <> stepCommand step <> " with prefix: " <> prefix <> "\n"
-    -- let prefix = ".coucouci/" <> jobName job <> "-" <> branch
     let cmd = shell $ T.unpack $ stepCommand step
     let log' msg = log $ T.unpack (fromMaybe (stepCommand step) (stepName step)) ++ " | " ++ msg
     let process = setStdout createSource $ setStderr createSource cmd
     withProcess process $ \p -> do
-        [out, err] <- Async.mapConcurrently
-            (\source -> C.runConduit $ source .| logAndAccumulate log')
-            [getStdout p, getStderr p]
+        STM.atomically $ STM.modifyTVar' stepProgress (set stepProgressStatus StepRunning)
+        Async.mapConcurrently
+            (\(source, getter) -> do
+                -- append each line of stdout/stderr to the corresponding sequence in
+                -- the StepProgress tvar
+                let updateFn bs = STM.atomically $ STM.modifyTVar' stepProgress
+                        (over getter (|> bs))
+                C.runConduit $ source .| logAndAccumulate log' updateFn
+                )
+            [(getStdout p, stepProgressStdout), (getStderr p, stepProgressStderr)]
         exit <- waitExitCode p
-        pure (exit, fromChunks out, fromChunks err)
+        let stepStatus = case exit of
+                Exit.ExitSuccess -> StepExitOk
+                Exit.ExitFailure code -> StepExitError code
+        STM.atomically $ STM.modifyTVar' stepProgress (set stepProgressStatus stepStatus)
+        finalState <- STM.readTVarIO stepProgress
+        let out' = toList $ finalState ^. stepProgressStdout
+        let err' = toList $ finalState ^. stepProgressStderr
+        pure (exit, fromChunks out', fromChunks err')
 
 
-logAndAccumulate :: (String -> IO ()) -> C.ConduitM BS.ByteString a IO [BS.ByteString]
-logAndAccumulate log = C.mapMC (\s -> log (T.unpack $ T.decodeUtf8 s) >> pure s) .| C.sinkList
+logAndAccumulate
+    :: (String -> IO ())
+    -> (BS.ByteString -> IO ()) -- function to update the state
+    -> C.ConduitM BS.ByteString a IO ()
+logAndAccumulate log updateFn = C.mapMC
+    (\s -> log (T.unpack $ T.decodeUtf8 s) >> updateFn s >> pure s)
+    .| C.sinkNull
 
 
 -- TODO this throws an exception in case an error occur, need to handle that
