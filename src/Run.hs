@@ -74,7 +74,9 @@ runStep log prefix (step, stepProgress) = do
         Async.mapConcurrently
             (\(source, chan) -> do
                 let updateFn = STM.atomically . writeMemoryChan chan
-                C.runConduit $ source .| logAndAccumulate log' updateFn
+                C.runConduit $ source
+                    .| C.mapMC (\s -> STM.atomically (writeMemoryChan chan s) >> pure s)
+                    .| C.sinkNull
                 )
             [(getStdout p, outChan), (getStderr p, errChan)]
         exit <- waitExitCode p
@@ -90,15 +92,6 @@ runStep log prefix (step, stepProgress) = do
             content <- dump errChan
             pure $ fromChunks $ toList content
         pure (exit, out', err')
-
-
-logAndAccumulate
-    :: (String -> IO ())
-    -> (BS.ByteString -> IO ()) -- function to update the state
-    -> C.ConduitM BS.ByteString a IO ()
-logAndAccumulate log updateFn = C.mapMC
-    (\s -> log (T.unpack $ T.decodeUtf8 s) >> updateFn s >> pure s)
-    .| C.sinkNull
 
 
 -- TODO this throws an exception in case an error occur, need to handle that
