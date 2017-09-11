@@ -22,6 +22,9 @@ import Data.Hashable
 import Control.Lens
 
 
+import MemoryChan
+
+
 minimize :: String -> String
 minimize "" = ""
 minimize (c:str) = Char.toLower c : str
@@ -102,17 +105,17 @@ data JobStatus = NeverRun | Running | Completed deriving Show
 
 data JobDetail = JobDetail
     { _jobDetailStatus :: JobStatus
-    , _jobDetailStepsProgress :: Map.HashMap Step (TVar StepProgress)
+    , _jobDetailStepsProgress :: Map.HashMap Step StepProgress
     }
 
 data StepStatus = StepNotRunning | StepRunning | StepExitOk | StepExitError Int
     deriving Show
 
 data StepProgress = StepProgress
-    { _stepProgressStatus :: StepStatus
-    , _stepProgressStdout :: Seq ByteString
-    , _stepProgressStderr :: Seq ByteString
-    } deriving Show
+    { _stepProgressStatus :: TVar StepStatus
+    , _stepProgressStdout :: MemoryChan ByteString
+    , _stepProgressStderr :: MemoryChan ByteString
+    }
 
 makeLenses ''JobDetail
 makeLenses ''StepProgress

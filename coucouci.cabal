@@ -21,6 +21,7 @@ executable coucouci
   other-modules:       Types
                      , Hook
                      , Run
+                     , Stream
                      , Cli
   build-depends:       base >= 4.7 && < 5
                      , bytestring
@@ -31,6 +32,7 @@ executable coucouci
                      , lens
                      , async
                      , stm
+                     , stm-chans
                      , SafeSemaphore
                      , typed-process
                      , unordered-containers

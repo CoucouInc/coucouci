@@ -11,6 +11,7 @@ import qualified System.Directory as Dir
 import Control.Concurrent.Async as Async
 import qualified Control.Concurrent.MSemN2 as Sem
 import qualified Control.Concurrent.STM as STM
+import qualified Control.Concurrent.STM.TMChan as Chan
 import qualified Data.Text as T
 import Data.Text.Encoding as T
 import System.Process.Typed
@@ -22,6 +23,7 @@ import qualified Data.HashMap.Strict as Map
 import Control.Lens
 
 import Types
+import MemoryChan
 
 
 runJob :: CiConfig -> (Job, STM.TVar JobDetail) -> T.Text -> IO ()
@@ -47,42 +49,47 @@ runJob config (job, jobDetail) branch = do
     log $ "Done executing job " ++ T.unpack (jobName job) ++ "\n"
 
 
-makeStepProgress :: Step -> IO (Step, STM.TVar StepProgress)
+makeStepProgress :: Step -> IO (Step, StepProgress)
 makeStepProgress step = do
-    t <- STM.newTVarIO (StepProgress StepNotRunning Seq.empty Seq.empty)
-    pure (step, t)
+    outChan <- newMemoryChan
+    errChan <- newMemoryChan
+    status <- STM.newTVarIO StepNotRunning
+    pure (step, StepProgress status outChan errChan)
 
 
 runStep
     :: (String -> IO ())
     -> T.Text
-    -> (Step, STM.TVar StepProgress)
+    -> (Step, StepProgress)
     -> IO (Exit.ExitCode, ByteString, ByteString)
 runStep log prefix (step, stepProgress) = do
     log $ T.unpack $ "Executing command: " <> stepCommand step <> " with prefix: " <> prefix <> "\n"
     let cmd = shell $ T.unpack $ stepCommand step
     let log' msg = log $ T.unpack (fromMaybe (stepCommand step) (stepName step)) ++ " | " ++ msg
     let process = setStdout createSource $ setStderr createSource cmd
+    let outChan = stepProgress ^. stepProgressStdout
+    let errChan = stepProgress ^. stepProgressStderr
     withProcess process $ \p -> do
-        STM.atomically $ STM.modifyTVar' stepProgress (set stepProgressStatus StepRunning)
+        STM.atomically $ STM.writeTVar (stepProgress ^. stepProgressStatus) StepRunning
         Async.mapConcurrently
-            (\(source, getter) -> do
-                -- append each line of stdout/stderr to the corresponding sequence in
-                -- the StepProgress tvar
-                let updateFn bs = STM.atomically $ STM.modifyTVar' stepProgress
-                        (over getter (|> bs))
+            (\(source, chan) -> do
+                let updateFn = STM.atomically . writeMemoryChan chan
                 C.runConduit $ source .| logAndAccumulate log' updateFn
                 )
-            [(getStdout p, stepProgressStdout), (getStderr p, stepProgressStderr)]
+            [(getStdout p, outChan), (getStderr p, errChan)]
         exit <- waitExitCode p
         let stepStatus = case exit of
                 Exit.ExitSuccess -> StepExitOk
                 Exit.ExitFailure code -> StepExitError code
-        STM.atomically $ STM.modifyTVar' stepProgress (set stepProgressStatus stepStatus)
-        finalState <- STM.readTVarIO stepProgress
-        let out' = toList $ finalState ^. stepProgressStdout
-        let err' = toList $ finalState ^. stepProgressStderr
-        pure (exit, fromChunks out', fromChunks err')
+        out' <- STM.atomically $ do
+            closeMemoryChan outChan
+            content <- dump outChan
+            pure $ fromChunks $ toList content
+        err' <- STM.atomically $ do
+            closeMemoryChan errChan
+            content <- dump errChan
+            pure $ fromChunks $ toList content
+        pure (exit, out', err')
 
 
 logAndAccumulate
