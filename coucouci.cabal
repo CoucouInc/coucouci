@@ -21,7 +21,7 @@ executable coucouci
   other-modules:       Types
                      , Hook
                      , Run
-                     , Stream
+                     , MemoryChan
                      , Cli
   build-depends:       base >= 4.7 && < 5
                      , bytestring
