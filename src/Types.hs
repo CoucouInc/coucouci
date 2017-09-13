@@ -134,4 +134,6 @@ data CiConfig = CiConfig
 data CliCommand =
     ServerStart {configLocation :: !FilePath}
     | ServerStop
-    | ServerStatus deriving Show
+    | ServerStatus
+    | Build {configLocation :: !FilePath}
+    deriving Show

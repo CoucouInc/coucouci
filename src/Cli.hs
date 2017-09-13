@@ -6,7 +6,8 @@ import Data.Monoid
 
 import Types
 
-startParser = ServerStart
+parseConfig :: (FilePath -> a) -> Parser a
+parseConfig f = f
     <$> strArgument (
         value "coucouci.yaml"
         <> metavar "CONFIG"
@@ -15,8 +16,10 @@ startParser = ServerStart
 
 cliCommand :: Parser CliCommand
 cliCommand = hsubparser
-    ( command "start" (info startParser (progDesc "Start the server"))
-    <> command "stop" (info (pure ServerStop) (progDesc "Stop the server")))
+    ( command "start" (info (parseConfig ServerStart) (progDesc "Start the server"))
+    <> command "stop" (info (pure ServerStop) (progDesc "Stop the server"))
+    <> command "run" (info (parseConfig Build) (progDesc "Build task"))
+    )
 
 opts :: ParserInfo CliCommand
 opts = info (cliCommand <**> helper)

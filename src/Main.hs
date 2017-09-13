@@ -35,9 +35,10 @@ main = do
     IO.hSetBuffering IO.stdout IO.NoBuffering
     cmd <- Cli.parseArgs
     case cmd of
-      ServerStart configLocation -> startServer configLocation
+      ServerStart c -> startServer c
       ServerStop -> putStrLn "stopping server"
       ServerStatus -> die "not implemented yet"
+      Build c -> buildOnce c
     putStrLn "done"
 
 
@@ -50,6 +51,16 @@ startServer configLocation = do
             putStrLn $ "got config: " ++ show config
             ciConf <- makeCiConfig config
             Hook.runHookServer (serverPort $ configServer config) ciConf
+
+buildOnce :: FilePath -> IO ()
+buildOnce configLoc = do
+    raw <- BS.readFile configLoc
+    case parseConfig raw of
+        Left err -> die (show err)
+        Right config -> do
+            putStrLn $ "got config: " ++ show config
+            ciConf <- makeCiConfig config
+            die $ "not implemented: build once"
 
 
 makeCiConfig :: Config -> IO CiConfig
