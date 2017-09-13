@@ -49,3 +49,4 @@ executable coucouci
                      , conduit-combinators
                      , resourcet
                      , optparse-applicative
+                     , req

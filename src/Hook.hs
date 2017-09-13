@@ -1,19 +1,22 @@
 {-# LANGUAGE DataKinds #-}
-{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE FlexibleContexts #-}
 
 module Hook (runHookServer) where
 
-import qualified Data.Aeson as JSON
+import GHC.Generics
+import Data.Aeson as JSON
 import qualified Data.Aeson.Text as JSON
-import Control.Lens
+import Control.Lens hiding ((.=))
 import Data.Aeson.Lens
+import Data.Monoid
 import Data.Text as T
+import Data.Text.Encoding as T
 import Data.Text.Lazy (toStrict)
 import qualified Data.ByteString.Lazy as LBS
 import Data.Maybe
@@ -33,21 +36,41 @@ import qualified Data.HashMap.Strict as Map
 import qualified Run as Run
 import Types
 
-type HookAPI = "coucouci" :> ReqBody '[JSON] GithubPayload :> Post '[JSON] NoContent
+
+newtype CoucouHandler a = CoucouHandler
+    { runCoucouHandler :: ReaderT CiConfig (ExceptT ServantErr IO) a }
+    deriving (Functor, Applicative, Monad, MonadReader CiConfig, MonadIO, MonadError ServantErr)
+
+
+newtype RunResult = RunResult T.Text deriving (Show)
+instance JSON.ToJSON RunResult where
+    toJSON (RunResult txt) = JSON.object ["result" .= txt]
+
+type CoucouAPI = "run" :> Capture "jobName" Text :> Post '[JSON] RunResult
+    :<|> "watch" :> Get '[JSON] NoContent
+
+type HookAPI =
+    "coucouci" :> ReqBody '[JSON] GithubPayload :> Post '[JSON] NoContent
+    :<|> "coucouci" :> "api" :> CoucouAPI
 
 type Resp = Text
 
 hookAPI :: Proxy HookAPI
 hookAPI = Proxy
 
-readerToHandler' :: forall a. CiConfig -> ReaderT CiConfig IO a -> Handler a
-readerToHandler' config r = liftIO (runReaderT r config)
+readerToHandler' :: forall a. CiConfig -> CoucouHandler a -> Handler a
+readerToHandler' config r = do
+    result <- liftIO $ runExceptT (runReaderT (runCoucouHandler r) config)
+    case result of
+        Left err -> throwError err
+        Right stuff -> pure stuff
 
-readerToHandler :: CiConfig -> ReaderT CiConfig IO :~> Handler
+
+readerToHandler :: CiConfig -> CoucouHandler :~> Handler
 readerToHandler config = NT $ readerToHandler' config
 
-hookServerT :: ServerT HookAPI (ReaderT CiConfig IO)
-hookServerT githubPayload = do
+hookHandler :: JSON.Value -> CoucouHandler NoContent
+hookHandler githubPayload = do
     config <- ask
     let raw = unpack $ toStrict $ JSON.encodeToLazyText githubPayload :: String
     -- liftIO $ ciConfigLogger config $ "github payload: \n" ++ raw ++ "\n"
@@ -68,8 +91,21 @@ hookServerT githubPayload = do
 
     return NoContent
 
-findJob :: Text -> Map.HashMap Text (Job, TVar JobDetail) -> Maybe (Job, TVar JobDetail)
-findJob gitubName = List.find (\(j, _) -> jobGithubName j == gitubName) . fmap snd . Map.toList
+-- figure out the correct types to allow throwing an error in the handlers
+runJobApiHandler :: Text -> CoucouHandler RunResult
+runJobApiHandler job = do
+    ciConfig <- ask
+    case findJob job (ciConfigJobs ciConfig) of
+      Nothing -> throwError err404 {errBody = "Job not found: " <> LBS.fromStrict (T.encodeUtf8 job)}
+      Just j -> error "wip runJobApiHandler"
+
+
+-- apiHandler :: JSON.Value -> CoucouHandler NoContent
+apiHandler = runJobApiHandler :<|> pure NoContent
+
+
+hookServerT :: ServerT HookAPI CoucouHandler
+hookServerT = hookHandler :<|> apiHandler
 
 hookServer :: CiConfig -> Server HookAPI
 hookServer config = enter (readerToHandler config) hookServerT
@@ -108,14 +144,6 @@ hoist _ (Just x) = Right x
 except :: Either e a -> Except e a
 except m = ExceptT (Identity m)
 
-testExcept :: String -> Either String Int
-testExcept str = runExcept $ do
-    when (str == "foo") (throwError "boom")
-    stuff <- except $ hoist "bar" $ List.find (const True) [str]
-    -- len <-if str == "foo"
-    --         then throwError "boom"
-    --         else pure (Prelude.length str)
-    let len = Prelude.length str
-    if len < 3
-        then throwError "too small"
-        else pure len
+
+findJob :: Text -> Map.HashMap Text (Job, TVar JobDetail) -> Maybe (Job, TVar JobDetail)
+findJob gitubName = List.find (\(j, _) -> jobGithubName j == gitubName) . fmap snd . Map.toList
