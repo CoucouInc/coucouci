@@ -49,11 +49,11 @@ hookServerT :: ServerT HookAPI (ReaderT CiConfig IO)
 hookServerT githubPayload = do
     config <- ask
     let raw = unpack $ toStrict $ JSON.encodeToLazyText githubPayload :: String
-    liftIO $ ciConfigLogger config $ "github payload: \n" ++ raw ++ "\n"
+    -- liftIO $ ciConfigLogger config $ "github payload: \n" ++ raw ++ "\n"
     let repoName = githubPayload ^.key "repository" .key "full_name" ._String
 
     let inspected = runExcept $ do
-            toRun@(job, jobDetails) <- except $ hoist "No matching job" $
+            toRun@(job, jobDetails) <- except $ hoist ("No job matching " ++ T.unpack repoName) $
                 Map.lookup repoName (ciConfigJobs config)
             branch <- except $ hoist "no branch found!" $ getBranch githubPayload
             let branchFound = case jobBranches job of

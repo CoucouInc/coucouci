@@ -73,10 +73,8 @@ runStep log prefix (step, stepProgress) = do
     withProcess process $ \p -> do
         STM.atomically $ STM.writeTVar (stepProgress ^. stepProgressStatus) StepRunning
         Async.mapConcurrently
-            (\(source, chan) -> do
-                let updateFn = STM.atomically . writeMemoryChan chan
-                C.runConduit $ source
-                    .| C.mapMC (\s -> STM.atomically (writeMemoryChan chan s) >> pure s)
+            (\(source, chan) -> C.runConduit $ source
+                    .| C.mapMC (\s -> log' (T.unpack $ T.decodeUtf8 s) >>  STM.atomically (writeMemoryChan chan s) >> pure s)
                     .| C.sinkNull
                 )
             [(getStdout p, outChan), (getStderr p, errChan)]

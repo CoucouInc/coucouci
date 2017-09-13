@@ -33,6 +33,7 @@ parseConfig = Yaml.decodeEither'
 main :: IO ()
 main = do
     IO.hSetBuffering IO.stdout IO.NoBuffering
+    IO.hSetBuffering IO.stderr IO.NoBuffering
     cmd <- Cli.parseArgs
     case cmd of
       ServerStart c -> startServer c
