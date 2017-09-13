@@ -18,6 +18,7 @@ import Data.Text.Lazy (toStrict)
 import qualified Data.ByteString.Lazy as LBS
 import Data.Maybe
 
+import Control.Concurrent.STM.TVar
 import qualified Control.Concurrent.Async as Async
 import Control.Monad.Reader
 import Control.Monad.IO.Class (liftIO)
@@ -54,7 +55,7 @@ hookServerT githubPayload = do
 
     let inspected = runExcept $ do
             toRun@(job, jobDetails) <- except $ hoist ("No job matching " ++ T.unpack repoName) $
-                Map.lookup repoName (ciConfigJobs config)
+                findJob repoName (ciConfigJobs config)
             branch <- except $ hoist "no branch found!" $ getBranch githubPayload
             let branchFound = case jobBranches job of
                     AllBranches -> True
@@ -67,6 +68,8 @@ hookServerT githubPayload = do
 
     return NoContent
 
+findJob :: Text -> Map.HashMap Text (Job, TVar JobDetail) -> Maybe (Job, TVar JobDetail)
+findJob gitubName = List.find (\(j, _) -> jobGithubName j == gitubName) . fmap snd . Map.toList
 
 hookServer :: CiConfig -> Server HookAPI
 hookServer config = enter (readerToHandler config) hookServerT
