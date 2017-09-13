@@ -28,10 +28,11 @@ import MemoryChan
 
 runJob :: CiConfig -> (Job, STM.TVar JobDetail) -> T.Text -> IO ()
 runJob config (job, jobDetail) branch = do
+    let log = ciConfigLogger config
+    log $ "start running " ++ show job
     let cloneUrl = "https://github.com/" <> jobGithubName job <> ".git"
     let steps = jobSteps job
     let sem = ciConfigExecutorLock config
-    let log = ciConfigLogger config
     runProcess "mkdir -p .coucouci"
     clone job cloneUrl branch
     log $ "got " ++ show (length steps) ++ " steps\n"
