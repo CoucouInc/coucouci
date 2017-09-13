@@ -61,7 +61,7 @@ buildOnce configLoc = do
         Right config -> do
             putStrLn $ "got config: " ++ show config
             ciConf <- makeCiConfig config
-            die $ "not implemented: build once"
+            Run.runJobsOnce config ciConf
 
 
 makeCiConfig :: Config -> IO CiConfig

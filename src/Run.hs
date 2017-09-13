@@ -92,6 +92,16 @@ runStep log prefix (step, stepProgress) = do
             pure $ fromChunks $ toList content
         pure (exit, out', err')
 
+runJobsOnce :: Config -> CiConfig -> IO ()
+runJobsOnce config ciConf = do
+    jobs <- mapM jobDetail (configJobs config)
+    mapM_ (\(_, job) -> Run.runJob ciConf job (T.pack "master")) jobs
+  where
+    jobDetail j = do
+        tvar <- STM.newTVarIO (JobDetail NeverRun Map.empty)
+        pure (jobName j, (j, tvar))
+
+
 
 -- TODO this throws an exception in case an error occur, need to handle that
 clone :: Job -> T.Text -> T.Text -> IO ()
