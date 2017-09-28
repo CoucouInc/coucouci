@@ -29,6 +29,9 @@ import Control.Monad.Except
 import qualified Network.Wai as Wai
 import Network.Wai.Handler.Warp (run)
 import Servant
+import Servant.API.WebSocketConduit
+import Data.Conduit ((.|), Conduit)
+import qualified Data.Conduit.List as CL
 import Data.Void
 import qualified Data.List as List
 import qualified Data.HashMap.Strict as Map
@@ -55,8 +58,12 @@ type HookAPI =
 
 type Resp = Text
 
-hookAPI :: Proxy HookAPI
+type EchoAPI = "echo" :> WebSocketConduit JSON.Value JSON.Value
+
+
+hookAPI :: Proxy (HookAPI :<|> EchoAPI)
 hookAPI = Proxy
+
 
 readerToHandler' :: forall a. CiConfig -> CoucouHandler a -> Handler a
 readerToHandler' config r = do
@@ -68,6 +75,7 @@ readerToHandler' config r = do
 
 readerToHandler :: CiConfig -> CoucouHandler :~> Handler
 readerToHandler config = NT $ readerToHandler' config
+
 
 hookHandler :: JSON.Value -> CoucouHandler NoContent
 hookHandler githubPayload = do
@@ -91,6 +99,7 @@ hookHandler githubPayload = do
 
     return NoContent
 
+
 -- figure out the correct types to allow throwing an error in the handlers
 runJobApiHandler :: Text -> CoucouHandler RunResult
 runJobApiHandler job = do
@@ -100,15 +109,22 @@ runJobApiHandler job = do
       Just j -> error "wip runJobApiHandler"
 
 
--- apiHandler :: JSON.Value -> CoucouHandler NoContent
+apiHandler :: (Text -> CoucouHandler RunResult) :<|> CoucouHandler NoContent
 apiHandler = runJobApiHandler :<|> pure NoContent
+
+
+-- echoHandler :: CiConfig -> WebSocketConduit JSON.Value JSON.Value
+echoHandler config = echo
+  where
+      echo :: MonadIO m => Conduit JSON.Value m JSON.Value
+      echo = CL.mapM (\i -> liftIO (print i) >> pure i) .| CL.map id
 
 
 hookServerT :: ServerT HookAPI CoucouHandler
 hookServerT = hookHandler :<|> apiHandler
 
-hookServer :: CiConfig -> Server HookAPI
-hookServer config = enter (readerToHandler config) hookServerT
+hookServer :: CiConfig -> Server (HookAPI :<|> EchoAPI)
+hookServer config = enter (readerToHandler config) hookServerT :<|> echoHandler config
 
 hookApp :: CiConfig -> Wai.Application
 hookApp config = serve hookAPI (hookServer config)

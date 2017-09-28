@@ -41,6 +41,8 @@ executable coucouci
                      , vector
                      , servant
                      , servant-server
+                     , servant-websockets
+                     , websockets
                      , wai
                      , warp
                      , mtl
