@@ -28,4 +28,4 @@ jobs:
     steps:
       - run:
           name: "loop"
-          command: for i in {1..10}; do echo $i && sleep 1; done;
+          command: for i in {1..5}; do echo $i && sleep 1; done;

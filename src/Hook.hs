@@ -22,6 +22,7 @@ import qualified Data.ByteString.Lazy as LBS
 import Data.Maybe
 
 import Control.Concurrent.STM.TVar
+import Control.Concurrent
 import qualified Control.Concurrent.Async as Async
 import Control.Monad.Reader
 import Control.Monad.IO.Class (liftIO)
@@ -29,12 +30,13 @@ import Control.Monad.Except
 import qualified Network.Wai as Wai
 import Network.Wai.Handler.Warp (run)
 import Servant
-import Servant.API.WebSocketConduit
-import Data.Conduit ((.|), Conduit)
-import qualified Data.Conduit.List as CL
+import Servant.API.WebSocket
+import Network.WebSockets as WS
 import Data.Void
 import qualified Data.List as List
 import qualified Data.HashMap.Strict as Map
+import Data.ByteString (ByteString)
+import Control.Exception as Exc hiding (Handler)
 
 import qualified Run as Run
 import Types
@@ -58,7 +60,7 @@ type HookAPI =
 
 type Resp = Text
 
-type EchoAPI = "echo" :> WebSocketConduit JSON.Value JSON.Value
+type EchoAPI = "echo" :> WebSocket
 
 
 hookAPI :: Proxy (HookAPI :<|> EchoAPI)
@@ -102,29 +104,44 @@ hookHandler githubPayload = do
 
 -- figure out the correct types to allow throwing an error in the handlers
 runJobApiHandler :: Text -> CoucouHandler RunResult
-runJobApiHandler job = do
+runJobApiHandler jobName = do
     ciConfig <- ask
-    case findJob job (ciConfigJobs ciConfig) of
-      Nothing -> throwError err404 {errBody = "Job not found: " <> LBS.fromStrict (T.encodeUtf8 job)}
-      Just j -> error "wip runJobApiHandler"
+    case Map.lookup jobName (ciConfigJobs ciConfig) of
+      Nothing -> do
+          liftIO $ print $ Map.keys (ciConfigJobs ciConfig)
+          throwError err404 {errBody = "Job not found: " <> LBS.fromStrict (T.encodeUtf8 jobName)}
+      Just j -> do
+          liftIO $ void $ Async.async $ Run.runJob ciConfig j "master"
+          liftIO $ ciConfigLogger ciConfig "returning \"started\" here\n"
+          pure (RunResult "started")
+
 
 
 apiHandler :: (Text -> CoucouHandler RunResult) :<|> CoucouHandler NoContent
 apiHandler = runJobApiHandler :<|> pure NoContent
 
 
--- echoHandler :: CiConfig -> WebSocketConduit JSON.Value JSON.Value
-echoHandler config = echo
-  where
-      echo :: MonadIO m => Conduit JSON.Value m JSON.Value
-      echo = CL.mapM (\i -> liftIO (print i) >> pure i) .| CL.map id
+wsHandler :: CiConfig -> Connection -> Handler ()
+wsHandler config conn = do
+    liftIO $ ciConfigLogger config "ws handler here\n"
+    let jobName = "looping"
+    case Map.lookup jobName (ciConfigJobs config) of
+      Nothing ->
+          -- todo this doesn't quite work properly, need a helper to send the message
+          -- through the ws connection and then close it gracefully
+          throwError err404 {errBody = "Job not found: " <> LBS.fromStrict (T.encodeUtf8 jobName)}
+      Just (_, tJobDetail) -> do
+          jobDetail <- liftIO $ readTVarIO tJobDetail
+          let status = "status: " <> pack (show $ jobDetail ^. jobDetailStatus)
+          liftIO $ WS.sendTextData conn status
+          pure ()
 
 
 hookServerT :: ServerT HookAPI CoucouHandler
 hookServerT = hookHandler :<|> apiHandler
 
 hookServer :: CiConfig -> Server (HookAPI :<|> EchoAPI)
-hookServer config = enter (readerToHandler config) hookServerT :<|> echoHandler config
+hookServer config = enter (readerToHandler config) hookServerT :<|> wsHandler config
 
 hookApp :: CiConfig -> Wai.Application
 hookApp config = serve hookAPI (hookServer config)
